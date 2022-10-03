@@ -1,0 +1,3 @@
+.env
+bot_data/questions.csv
+bot_data/users.txt
