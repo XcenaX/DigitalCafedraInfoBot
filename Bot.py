@@ -5,9 +5,12 @@ from telebot import TeleBot, types
 
 from threading import Thread
 import csv
+import pandas as pd
 import os
 
 question_text = ''
+QUESTIONS_PER_PAGE = 8
+page = 1
 
 class Bot():
     owners_file = "bot_data/owners.txt"
@@ -38,13 +41,19 @@ class Bot():
                 send = self.bot.send_message(message.chat.id, "Напишите вопрос: ", reply_markup=self.get_cancel_keyboard())
                 self.bot.register_next_step_handler(send, self.another_question)                
             elif "Добавить вопрос" in message.text:
-                send = self.bot.send_message(message.chat.id, "Напишите текст вопроса: ", reply_markup=self.get_cancel_keyboard())
-                self.bot.register_next_step_handler(send, self.create_question)                
-            elif "Назад" == message.text:
+                if self.check_owner(message.from_user.id):        
+                    send = self.bot.send_message(message.chat.id, "Напишите текст вопроса: ", reply_markup=self.get_cancel_keyboard())
+                    self.bot.register_next_step_handler(send, self.create_question)                
+            elif "Удалить вопрос" in message.text:
+                if self.check_owner(message.from_user.id):        
+                    send = self.bot.send_message(message.chat.id, "Выбрите вопрос: ", reply_markup=self.get_delete_question_keyboard())
+                    self.bot.register_next_step_handler(send, self.search_question)                
+            elif "Отмена" == message.text:
                 self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
                 self.show_main_menu(message)               
             else:
                 self.bot.send_message(message.chat.id, "Я тебя не понимаю")
+                self.show_main_menu(message)               
             # try:
             #     self.bot.delete_message(message.chat.id, message.id)
             # except:
@@ -52,12 +61,12 @@ class Bot():
         
         @self.bot.callback_query_handler(func=lambda call: True)
         def callback_question(call):                        
-            if "Назад" == call.data:
+            if "Отмена" == call.data:
                 self.bot.clear_step_handler_by_chat_id(chat_id=call.message.chat.id)
                 self.show_main_menu(call.message)                
 
     def another_question(self, message):
-        if message.text == "Назад":
+        if message.text == "Отмена":
             self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
             self.show_main_menu(message)
         else:
@@ -71,7 +80,7 @@ class Bot():
             self.bot.register_next_step_handler(send, self.another_question)     
 
     def main_question(self, message):
-        if message.text == "Назад":
+        if message.text == "Отмена":
             self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
             self.show_main_menu(message)
         elif message.text == "Другой вопрос":
@@ -89,7 +98,7 @@ class Bot():
 
     def create_question(self, message):
         global question_text 
-        if message.text == "Назад":
+        if message.text == "Отмена":
             self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
             self.show_main_menu(message)
         else:
@@ -99,21 +108,50 @@ class Bot():
     
     def create_question2(self, message):
         global question_text
-        if message.text != "Назад":
+        if message.text != "Отмена":
             question_answer = message.text
             self.add_question(question_text,  question_answer)
         self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
-        self.show_main_menu(message)       
+        self.show_main_menu(message)    
+
+    def search_question(self, message):
+        global page
+        count_questions = len(self.get_questions(questions_type='all'))
+        if message.text == "Отмена":
+            self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
+            self.show_main_menu(message)  
+            return 
+        elif message.text == "Дальше":
+            if page * QUESTIONS_PER_PAGE < count_questions:
+                page += 1
+        elif message.text == "Назад":
+            if page > 1:
+                page -= 1
+        else:
+            question = self.get_question(str(message.text), 'all')
+            if question:
+                self.remove_question(question["question"])
+                self.bot.send_message(message.chat.id, "Вопрос успешно удалён!")                 
+            else:
+                self.bot.send_message(message.chat.id, "Что-то пошло не так! Вопрос не удалён!")                
+            self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
+            self.show_main_menu(message)
+            return
+
+        send = self.bot.send_message(message.chat.id, "Выберите вопрос", reply_markup=self.get_delete_question_keyboard(page=page))
+        self.bot.register_next_step_handler(send, self.search_question)   
 
     def show_main_menu(self, message):
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         ask_question = types.KeyboardButton("Спросить вопрос 📝")
         add_question = types.KeyboardButton("Добавить вопрос ➕")
+        remove_question = types.KeyboardButton("Удалить вопрос ➖")
         
         markup.add(ask_question)
             
         if self.check_owner(message.from_user.id):
             markup.add(add_question)
+            markup.add(remove_question)
 
         self.bot.send_message(message.chat.id, "Выберите действие", reply_markup=markup)
 
@@ -133,7 +171,7 @@ class Bot():
         file = self.questions_file if questions_type == "all" else self.main_questions_file
         questions = []
         with open(file, encoding="utf-8") as csv_file:
-            csv_reader = csv.reader(csv_file, delimiter=';')
+            csv_reader = csv.reader(csv_file, delimiter=',')
             line_count = 0
             for row in csv_reader:                
                 if line_count > 0:                    
@@ -142,17 +180,23 @@ class Bot():
                 line_count+=1
         return questions
     
-    def get_question(self, question_id):
-        questions = self.get_questions("main")
+    def get_question(self, question_text, question_type='main'):
+        questions = self.get_questions(question_type)
         for question in questions:
-            if question["id"] == question_id:
+            if question["question"] == question_text:
                 return question
         return None
 
     def add_question(self, question, answer):
         with open(self.questions_file, mode='a', encoding="utf-8", newline='') as csv_file:
-            writer = csv.writer(csv_file, delimiter=';')
+            writer = csv.writer(csv_file, delimiter=',')
             writer.writerow([question, answer])        
+    
+    def remove_question(self, text):
+        df = pd.read_csv(self.questions_file, delimiter=',')
+        df = df.loc[df["question"] != text]       
+        print(df)
+        df.to_csv(self.questions_file, index=False)       
 
     def add_user(self, id):
         id = str(id)
@@ -183,6 +227,26 @@ class Bot():
         keyboard.add(ask_question)
         keyboard.add(add_question)
         return keyboard
+    
+    def get_delete_question_keyboard(self, page=1):
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True) 
+        questions = self.get_questions("all")
+        length = len(questions)
+        end = QUESTIONS_PER_PAGE*page
+        start = end - QUESTIONS_PER_PAGE
+        data = questions[start : end]
+        for question in data:
+            current_question = types.KeyboardButton(question["question"])          
+            keyboard.add(current_question)
+        cancel = types.KeyboardButton("Отмена")          
+        _next = types.KeyboardButton("Дальше")          
+        prev = types.KeyboardButton("Назад")          
+        keyboard.add(cancel)
+        if length - end > 0:
+            keyboard.add(_next)
+        if start >= 1:
+            keyboard.add(prev)
+        return keyboard
 
     def get_user_keyboard(self):
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True) 
@@ -192,7 +256,7 @@ class Bot():
 
     def get_cancel_keyboard(self):
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True) 
-        cancel = types.InlineKeyboardButton(text="Назад", callback_data="cancel")
+        cancel = types.InlineKeyboardButton(text="Отмена", callback_data="cancel")
         keyboard.add(cancel)
         return keyboard
 
@@ -203,7 +267,7 @@ class Bot():
             current_question = types.InlineKeyboardButton(text=question["question"])
             keyboard.add(current_question)
         another_question = types.KeyboardButton("Другой вопрос")            
-        cancel = types.InlineKeyboardButton(text="Назад", callback_data="cancel")        
+        cancel = types.InlineKeyboardButton(text="Отмена", callback_data="cancel")        
         keyboard.add(another_question)
         keyboard.add(cancel)        
         return keyboard
