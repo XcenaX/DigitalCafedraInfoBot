@@ -20,6 +20,7 @@ class Bot():
     questions_file = "bot_data/questions.csv"
     main_questions_file = "bot_data/main_questions.csv"
     log_file = "bot_data/logs.txt"
+    asked_questions_file = "bot_data/asked_questions.txt"
     bot = None
     
     def __init__(self, settings):
@@ -29,6 +30,7 @@ class Bot():
         self.questions_file = os.path.join(settings["BASE_DIR"],self.questions_file)
         self.main_questions_file = os.path.join(settings["BASE_DIR"],self.main_questions_file)
         self.log_file = os.path.join(settings["BASE_DIR"],self.log_file)
+        self.asked_questions_file = os.path.join(settings["BASE_DIR"],self.asked_questions_file)
 
         @self.bot.message_handler(commands=['start'])
         def start(message):
@@ -74,6 +76,7 @@ class Bot():
             self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
             self.show_main_menu(message)
         else:
+            self.add_asked_question(message.text)
             questions = self.get_questions(questions_type="all")
             answer = "Извини, на этот вопрос я не знаю ответа. Попробуй задать другой вопрос"    
             for question in questions:
@@ -185,6 +188,10 @@ class Bot():
     
     def add_log(self, text):
         with open(self.log_file, "a", encoding='utf-8') as f:
+            f.write("\n"+text)
+    
+    def add_asked_question(self, text):
+        with open(self.asked_questions_file, "a", encoding='utf-8') as f:
             f.write("\n"+text)
 
     def get_questions(self, questions_type):
