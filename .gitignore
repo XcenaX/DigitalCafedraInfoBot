@@ -3,3 +3,4 @@ bot_data/questions.csv
 bot_data/users.txt
 bot_data/logs.txt
 bot_data/asked_questions.txt
+bot_data/owners.txt
