@@ -222,7 +222,6 @@ class Bot():
     def remove_question(self, text):
         df = pd.read_csv(self.questions_file, delimiter=',')
         df = df.loc[df["question"] != text]       
-        print(df)
         df.to_csv(self.questions_file, index=False)       
 
     def add_user(self, id):
