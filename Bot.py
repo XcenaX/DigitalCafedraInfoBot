@@ -7,16 +7,19 @@ from threading import Thread
 import csv
 import pandas as pd
 import os
+from datetime import datetime
 
 question_text = ''
 QUESTIONS_PER_PAGE = 8
 page = 1
+exclude_logs = ["XcenaX", "the_northlord"]
 
 class Bot():
     owners_file = "bot_data/owners.txt"
     users_file = "bot_data/users.txt"
     questions_file = "bot_data/questions.csv"
     main_questions_file = "bot_data/main_questions.csv"
+    log_file = "bot_data/logs.txt"
     bot = None
     
     def __init__(self, settings):
@@ -25,6 +28,7 @@ class Bot():
         self.users_file = os.path.join(settings["BASE_DIR"],self.users_file)
         self.questions_file = os.path.join(settings["BASE_DIR"],self.questions_file)
         self.main_questions_file = os.path.join(settings["BASE_DIR"],self.main_questions_file)
+        self.log_file = os.path.join(settings["BASE_DIR"],self.log_file)
 
         @self.bot.message_handler(commands=['start'])
         def start(message):
@@ -34,7 +38,7 @@ class Bot():
 
         @self.bot.message_handler(content_types=['text'])
         def main(message):                              
-            if "Спросить вопрос" in message.text:
+            if "Спросить вопрос" in message.text:                
                 send = self.bot.send_message(message.chat.id, "Выберите вопрос: ", reply_markup=self.get_questions_keyboard())
                 self.bot.register_next_step_handler(send, self.main_question)
             elif "Другой вопрос" == message.text:
@@ -111,6 +115,11 @@ class Bot():
         if message.text != "Отмена":
             question_answer = message.text
             self.add_question(question_text,  question_answer)
+            if message.from_user.username not in exclude_logs:
+                now = datetime.now()
+                dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
+                log = dt_string + " | " + message.from_user.username + " создал вопрос: (" + question_text + ") с ответом (" + question_answer + ")"
+                self.add_log(log)
         self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
         self.show_main_menu(message)    
 
@@ -130,8 +139,15 @@ class Bot():
         else:
             question = self.get_question(str(message.text), 'all')
             if question:
+                text = question["question"]
+                answer = question["answer"]
                 self.remove_question(question["question"])
-                self.bot.send_message(message.chat.id, "Вопрос успешно удалён!")                 
+                self.bot.send_message(message.chat.id, "Вопрос успешно удалён!")      
+                if message.from_user.username not in exclude_logs:
+                    now = datetime.now()
+                    dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
+                    log = dt_string + " | " + message.from_user.username + " удалил вопрос: (" + text + ") с ответом (" + answer + ")"
+                    self.add_log(log)
             else:
                 self.bot.send_message(message.chat.id, "Что-то пошло не так! Вопрос не удалён!")                
             self.bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
@@ -167,6 +183,10 @@ class Bot():
         content = [x.strip() for x in content]
         return content
     
+    def add_log(self, text):
+        with open(self.log_file, "a", encoding='utf-8') as f:
+            f.write("\n"+text)
+
     def get_questions(self, questions_type):
         file = self.questions_file if questions_type == "all" else self.main_questions_file
         questions = []
